@@ -1,40 +1,57 @@
 import numpy as np
-import imageio
+from PIL import Image
+from tools import set_contrast
 
-def scale(image, nRows, nCols):
-    nR0 = len(image)
-    nC0 = len(image[0])
-    return [[ image[int(nR0 * r / nRows)][int(nC0 * c / nCols)]  
-            for c in range(nCols)] for r in range(nRows)]
 
 class MosaicGenerator:
-    def __init__(self, numpy_array: np.ndarray, cols: int, nb_images: int, finalWidth, finalHeight):
+
+    numpy_array :np.ndarray
+    cols :int
+    nb_images :int
+    final_width :int
+    final_height :int
+
+    def __init__(self, numpy_array: np.ndarray, cols: int, nb_images: int, final_width :int, final_height :int):
         self.numpy_array = numpy_array
         self.cols = cols
         self.nb_images = nb_images
-        self.finalWidth = finalWidth
-        self.finalHeight = finalHeight
-        self.rows = int(self.nb_images / self.cols)
+        self.final_width = final_width
+        self.final_height = final_height
 
-    def getImages(self):
-        images = []
-        row = []
-        gap = int(len(self.numpy_array) / self.nb_images)
-        for i in range(self.nb_images):
-            row.append(self.numpy_array[i * gap])
-            if (i + 1) % self.cols == 0:
-                images.append(row)
-                row = []
-        return images
-    
-    def concatImages(self, images):
-        imagesRow = []
-        for i in range(self.rows):
-            imagesRow.append(np.concatenate(images[i], axis=1))
-        return np.concatenate(imagesRow, axis=0)
+    def combine_images(self, columns, images: np.array, space=0) -> Image:
+        rows = len(images) // columns
+        if len(images) % columns:
+            rows += 1
+        first_image = Image.fromarray(images[0])
+        width_max = first_image.width
+        height_max = first_image.height
+        background_width = width_max*columns + (space*columns)-space
+        background_height = height_max*rows + (space*rows)-space
+        concatenated_image = Image.new(
+            'L', (background_width, background_height))
+        x = 0
+        y = 0
+        for i, image in enumerate(images):
+            img = Image.fromarray(image.astype(np.uint16))
+            x_offset = int((width_max-img.width)/2)
+            y_offset = int((height_max-img.height)/2)
+            concatenated_image.paste(img, (x+x_offset, y+y_offset))
+            x += width_max + space
+            if (i+1) % columns == 0:
+                y += height_max + space
+                x = 0
+        return concatenated_image
 
-    def createImage(self, output):
-        images = self.getImages()
-        image = self.concatImages(images)
-        image = scale(image, self.finalWidth, self.finalHeight)
-        imageio.imwrite(output, image, format='.png')
+    def select_images(self) -> np.ndarray:
+        slices = []
+        for i in range(self.numpy_array.shape[0]):
+            if i % self.nb_images == 0:
+                slices.append(self.numpy_array[i])
+        return np.stack(slices)
+
+    def createImage(self, output: bytes) -> None :
+        images = self.select_images()
+        images = set_contrast(images)
+        image = self.combine_images(self.cols, images)
+        image.thumbnail((self.final_width, self.final_height), Image.BILINEAR)
+        image.save(output, format='PNG')
